@@ -11,9 +11,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
-import gpu_arena
-from gpu_arena import MeshArena, _INDIRECT_FIELDS, _AABB_FIELDS
-from chunk_data import VERTEX_STRIDE
+from render import gpu_arena
+from render.gpu_arena import MeshArena, _INDIRECT_FIELDS, _AABB_FIELDS
+from render.chunk_data import VERTEX_STRIDE
 
 
 class FakeBuffer:

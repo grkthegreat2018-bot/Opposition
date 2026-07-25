@@ -10,14 +10,14 @@ import numpy as np
 import glfw
 from rendercanvas.glfw import RenderCanvas, loop
 
-import config
-from config import Config
+import core.config as config
+from core.config import Config
 from terrain import ChunkManager
-from camera import Camera
-from renderer import TerrainRenderer
-from profiler import PerformanceProfiler
-from sky import compute_sky_params
-from debug_hud import DebugHUD
+from core.camera import Camera
+from render.renderer import TerrainRenderer
+from core.profiler import PerformanceProfiler
+from render.sky import compute_sky_params
+from render.debug_hud import DebugHUD
 
 
 def _ray_aabb(origin: np.ndarray, direction: np.ndarray, bbox: tuple) -> tuple[float | None, float | None]:

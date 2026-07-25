@@ -24,7 +24,7 @@ import numpy as np
 from rendercanvas.glfw import loop
 
 from main import App
-from sky import compute_sky_params
+from render.sky import compute_sky_params
 
 # ---------------------------------------------------------------------------
 # Script configuration — tweak these to change the playback sequence.

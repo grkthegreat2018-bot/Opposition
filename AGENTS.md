@@ -19,7 +19,7 @@
 Before running, compile changed modules:
 
 ```powershell
-.venv\Scripts\python.exe -m py_compile renderer.py shaders.py chunk_data.py occlusion.py water.py camera.py main.py
+.venv\Scripts\python.exe -m py_compile render\renderer.py render\shaders.py render\chunk_data.py render\occlusion.py render\water.py core\camera.py main.py
 ```
 
 ## Recent Architecture
@@ -43,16 +43,18 @@ Before running, compile changed modules:
   - 4-biome blending (tundra/mountain/desert/forest) via temperature/humidity simplex noise. 4 additional biomes (beach/savanna/swamp/volcanic) computed in-shader.
   - Per-vertex (packed, 32 bytes): position(float32x3) + normal(snorm8x4) + biome(unorm8x4) + sediment_curvature(float16x2) + 8 bytes pad. Was 48 bytes (12 floats).
   - Domain warp amplitude must stay under ~1.0 noise-input units (see `docs/bug_bed_of_nails.md`).
-- `shaders.py`: WGSL shader source (`SHADER` = terrain PBR shader, `BBOX_SHADER` = position-only depth shader). Extracted from renderer.py.
-- `chunk_data.py`: `_ChunkData` — CPU-side chunk mesh data used to build merged GPU buffers. Extracted from renderer.py.
-- `renderer.py`: `TerrainRenderer` — pipeline creation, uniform updates, shadow MVP, draw orchestration. Imports shaders and chunk data from their own modules.
+- `render/shaders.py`: WGSL shader source (`SHADER` = terrain PBR shader, `BBOX_SHADER` = position-only depth shader). Extracted from renderer.py.
+- `render/chunk_data.py`: `_ChunkData` — CPU-side chunk mesh data used to build merged GPU buffers. Extracted from renderer.py.
+- `render/renderer.py`: `TerrainRenderer` — pipeline creation, uniform updates, shadow MVP, draw orchestration. Imports shaders and chunk data from their own modules.
   - **PBR lighting** (Cook-Torrance BRDF): GGX normal distribution, Smith geometry, Schlick Fresnel, Lambert diffuse with energy conservation, metallic workflow.
   - Per-material roughness/metallic/AO: snow smooth, basalt rough, lava metallic, rock rough.
   - **Material details**: sand ripples (wind-aligned, desert/beach), rock strata (sedimentary banding on cliffs), snow SSS (wrap diffuse + forward scatter).
   - Two-octave slope-weighted normal perturbation, snow accumulation mask, sediment valley tint, curvature-based rock/dirt, wavelength-dependent aerial perspective fog with sun-scatter halo.
-- `occlusion.py`: `Occlusion` — GPU-driven HZB occlusion culling (prepass → HZB build → cull compute → main pass). Multi-line WGSL shaders (COPY/REDUCE/CULL). Main pass clears depth (not load) to avoid prepass depth leaking culled-chunk geometry into visible chunks (see `docs/bug_occlusion_seam_holes.md`).
-- `water.py` adds a large, transparent, camera-following water plane with procedural waves.
-- `camera.py` includes `orthographic()` used for the light projection matrix.
+- `render/occlusion.py`: `Occlusion` — GPU-driven HZB occlusion culling (prepass → HZB build → cull compute → main pass). Multi-line WGSL shaders (COPY/REDUCE/CULL). Main pass clears depth (not load) to avoid prepass depth leaking culled-chunk geometry into visible chunks (see `docs/bug_occlusion_seam_holes.md`).
+- `render/water.py` adds a large, transparent, camera-following water plane with procedural waves.
+- `core/camera.py` includes `orthographic()` used for the light projection matrix.
+- `core/config.py`: frozen dataclass configuration (NoiseConfig, ErosionConfig, FeatureConfig, StreamingConfig, CameraConfig, FogConfig, DisplayConfig, TimeConfig).
+- `core/profiler.py`: `PerformanceProfiler` — frame timing, memory tracking, chunk build stats.
 
 ## Dependencies
 
