@@ -59,6 +59,9 @@ Before running, compile changed modules:
 - `numba` (0.66.0): JIT-compiled simplex noise, fBm, erosion, and terrain features. Requires numpy < 2.5.
 - First chunk build per worker process incurs ~3.8s JIT compilation (all numba functions); subsequent
   builds use disk cache (`cache=True`). Warm builds: 1.4ms (no features) / 1.8ms (all features).
+- **Async prewarm**: the main process pre-compiles all numba functions on a background thread
+  (`_prewarm_numba` in `main.py`) while the window shows a loading screen. Worker processes
+  then load from disk cache. Chunk manager creation is deferred until prewarm completes.
 
 ## Performance Baseline (RTX 5070, 32GB RAM)
 

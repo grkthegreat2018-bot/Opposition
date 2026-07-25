@@ -84,8 +84,6 @@ class App:
     def __init__(self, cfg: Config | None = None):
         self.cfg = cfg or config.DEFAULT
         cfg = self.cfg
-        _prewarm_numba(cfg)
-        self.chunk_manager = ChunkManager(**cfg.chunk_manager_kwargs())
 
         disp = cfg.display
         self.canvas = RenderCanvas(size=(disp.width, disp.height), title=disp.title,
@@ -120,6 +118,45 @@ class App:
         self._bind_events()
         self._grab_mouse()
 
+        # Numba prewarm runs on a background thread so the window appears
+        # immediately with a loading screen instead of blocking ~6.5s.
+        # Chunk manager creation is deferred until prewarm completes, since
+        # its worker processes would otherwise recompile every jitted function.
+        self._prewarm_thread = None
+        self._prewarm_done = False
+        self._prewarm_started = False
+        self.chunk_manager = None
+        self._start_prewarm()
+
+        # Loading-screen HUD text.
+        self.debug_hud.update_text([
+            "COMPILING TERRAIN SHADERS...",
+            "PLEASE WAIT",
+        ])
+
+    def _start_prewarm(self):
+        import threading
+        def _worker():
+            _prewarm_numba(self.cfg)
+            self._prewarm_done = True
+        self._prewarm_started = True
+        self._prewarm_thread = threading.Thread(
+            target=_worker, name="numba-prewarm", daemon=True)
+        self._prewarm_thread.start()
+
+    def _finish_startup(self):
+        """Create the chunk manager and do the initial chunk load.
+
+        Called from _draw once the prewarm thread signals completion.
+        """
+        if self._prewarm_thread is not None:
+            self._prewarm_thread.join()
+            self._prewarm_thread = None
+        self.chunk_manager = ChunkManager(**self.cfg.chunk_manager_kwargs())
+        self.debug_hud.update_text([])
+        # Reset the frame clock so the first real frame doesn't get a 6s dt
+        # (which would jerk the camera and jump the day/night cycle).
+        self._last_time = time.time()
         # Initial chunk load
         self._update_chunks()
 
@@ -133,6 +170,9 @@ class App:
         self.camera.handle_key(key, True)
         if key == "Escape":
             self.canvas.close()
+        elif not self._prewarm_done:
+            # Ignore debug toggles during the loading screen.
+            return
         elif key == "F1":
             self._debug_enabled = not self._debug_enabled
             print(f"[DEBUG] HUD {'ON' if self._debug_enabled else 'OFF'}")
@@ -232,6 +272,16 @@ class App:
               f"yaw={self.camera.yaw:.4f}, pitch={self.camera.pitch:.4f}")
 
     def _draw(self):
+        # Loading screen while numba prewarm runs on a background thread.
+        if not self._prewarm_done:
+            # Always show the HUD during loading (it carries the "Compiling..."
+            # message); _debug_enabled is ignored until startup finishes.
+            self.renderer.draw_loading(self.debug_hud)
+            # Check again next frame; once done, finish startup in-place.
+            if self._prewarm_done:
+                self._finish_startup()
+            return
+
         self.profiler.frame_start()
 
         now = time.time()

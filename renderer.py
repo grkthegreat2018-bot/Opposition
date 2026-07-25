@@ -524,3 +524,36 @@ class TerrainRenderer:
         self.device.queue.submit([encoder.finish()])
 
         self.occlusion.swap()
+
+    def draw_loading(self, debug_hud=None):
+        """Minimal clear-only frame for the startup loading screen.
+
+        Used while the numba JIT prewarm runs on a background thread: the
+        window appears immediately with a "Compiling..." message instead of
+        blocking for ~6.5s with no visible window.
+        """
+        width, height = self.get_physical_size()
+        current = self.context.get_current_texture()
+        view = current.create_view(label="loading color view")
+        encoder = self.device.create_command_encoder(label="loading encoder")
+        pass_enc = encoder.begin_render_pass(
+            color_attachments=[{
+                "view": view,
+                "clear_value": {"r": 0.05, "g": 0.06, "b": 0.10, "a": 1.0},
+                "load_op": "clear",
+                "store_op": "store",
+            }],
+            depth_stencil_attachment={
+                "view": self.depth_view,
+                "depth_clear_value": 1.0,
+                "depth_load_op": "clear",
+                "depth_store_op": "store",
+            },
+            label="loading pass",
+        )
+        pass_enc.end()
+        if debug_hud is not None:
+            debug_hud.draw(encoder, view, self.depth_view,
+                           np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32),
+                           width, height)
+        self.device.queue.submit([encoder.finish()])
