@@ -69,6 +69,7 @@ Before running, compile changed modules:
 
 ## Performance Baseline (RTX 5070, 32GB RAM)
 
-- After numba noise + PBR + terrain features: ~880-950 FPS, ~2ms render time, ~0.05ms compute time, ~8% VRAM, ~3-4% GPU.
+- After GPU arena + packed vertices + continental worldgen: ~1100-1300 FPS avg, ~350 FPS min (chunk streaming), ~0.7ms render time, ~0.15ms compute time, ~8% VRAM, ~8-9% GPU, ~420MB proc mem.
 - Chunk build: 1.4ms warm (no features), 1.8ms warm (all 4 features). Was 12ms before numba.
 - Vertex buffer: 32 bytes/vertex (packed: pos f32x3 + normal snorm8x4 + biome unorm8x4 + sc f16x2 + pad). Was 48 bytes. Fragment shader: PBR adds ~15 ALU ops, material details add ~10.
+- Numba prewarm: ~0.36s cached, ~6.5s cold start. Runs async on a background thread with a loading screen.
