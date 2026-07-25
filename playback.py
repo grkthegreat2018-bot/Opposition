@@ -18,6 +18,7 @@ import os
 
 os.environ.setdefault("WGPU_BACKEND_TYPE", "Vulkan")
 
+import argparse
 import time
 import numpy as np
 from rendercanvas.glfw import loop
@@ -44,11 +45,21 @@ HOLD_FRAMES = 90                    # hold position after script before exiting 
 class PlaybackApp(App):
     """App subclass with a scripted, deterministic camera path."""
 
-    def __init__(self):
+    def __init__(self, benchmark: bool = False, report_path: str | None = None):
         # Prevent the parent from grabbing the mouse — we control the camera
         # entirely from the script, and mouse input would perturb yaw/pitch.
         self._skip_mouse_grab = True
         super().__init__()
+
+        # Benchmark mode: capture every frame and skip the realtime pacing
+        # sleep, so the measured frame times reflect actual throughput rather
+        # than the 60 Hz limiter.
+        self.benchmark = benchmark
+        self.report_path = report_path or "benchmark.json"
+        self.label = ""
+        self._realtime_pace = REALTIME_PACE and not benchmark
+        if benchmark:
+            self.profiler.record_all = True
 
         # Reset camera to known initial state.
         self.camera.pos = np.array([0.0, 8.0, 25.0], dtype=np.float32)
@@ -79,6 +90,8 @@ class PlaybackApp(App):
     def _scripted_update(self, dt):
         """Drive the camera through deterministic phases."""
         self._phase_frame += 1
+        if self._phase_frame == 1:
+            self.profiler.mark(self._phase)
 
         if self._phase == "warmup":
             # Camera stays still; chunks load around initial position.
@@ -192,20 +205,41 @@ class PlaybackApp(App):
         render_time = time.perf_counter() - t0
 
         summary = self.profiler.frame_end(render_time=render_time, compute_time=compute_time)
-        if summary:
+        if summary and not self.benchmark:
             # Do NOT adjust radius — keep chunk load set identical across runs.
+            # Suppressed under --benchmark: the console write costs ~ms and
+            # adds variance to the very frame times we are measuring.
             self.profiler.log(summary, self.chunk_manager)
 
         self._frame_count += 1
 
         # Frame limiter: sleep so wall-clock keeps pace with sim time.
         # This makes 60s of scripted simulation take ~60s real time.
-        if REALTIME_PACE:
+        if self._realtime_pace:
             self._pace_frame += 1
             target_wall = self._pace_origin + self._pace_frame * FRAME_DT
             slack = target_wall - time.perf_counter()
             if slack > 0:
                 time.sleep(slack)
+
+    def _emit_report(self):
+        if not self.benchmark:
+            return
+        meta = {
+            "label": self.label,
+            "grid_res": self.chunk_manager.grid_res,
+            "chunk_size": self.chunk_manager.chunk_size,
+            "radius": self.chunk_manager.radius,
+            "seed": self.chunk_manager.seed,
+        }
+        # Discard the warmup phase — chunk pop-in and pipeline compilation
+        # there would dominate the tail percentiles and mask real regressions.
+        report = self.profiler.write_report(
+            self.report_path, meta=meta, warmup_frames=WARMUP_FRAMES,
+        )
+        print()
+        print(self.profiler.format_benchmark(report))
+        print(f"\nWrote {self.report_path}")
 
     def run(self):
         # Use the scripted draw callback instead of the parent's _draw.
@@ -213,8 +247,20 @@ class PlaybackApp(App):
         print("Entering scripted playback loop...")
         loop.run()
         print("Playback loop exited.")
+        self._emit_report()
 
 
 if __name__ == "__main__":
-    app = PlaybackApp()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--benchmark", action="store_true",
+                        help="capture every frame, disable the 60Hz pacing "
+                             "sleep, and write a JSON report on exit")
+    parser.add_argument("--report", default="benchmark.json",
+                        help="path for the JSON benchmark report")
+    parser.add_argument("--label", default="",
+                        help="label stored in the report, e.g. 'baseline'")
+    args = parser.parse_args()
+
+    app = PlaybackApp(benchmark=args.benchmark, report_path=args.report)
+    app.label = args.label
     app.run()
