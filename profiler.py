@@ -162,7 +162,7 @@ class PerformanceProfiler:
             tris = getattr(c, "tri_count", 0)
             verts = getattr(c, "vert_count", 0)
             bt = getattr(c, "build_time", 0.0) * 1000.0
-            mem = verts * 12 * 4 + tris * 3 * 4
+            mem = verts * 32 + tris * 3 * 4
             return f"chunk{key} tris={tris} verts={verts} build={bt:.2f}ms mem={mem/1024:.1f}KB"
 
         return [fmt(c) for c in by_time], [fmt(c) for c in by_tris]

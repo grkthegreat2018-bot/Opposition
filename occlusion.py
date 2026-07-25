@@ -123,7 +123,7 @@ class Occlusion:
     def __init__(self, renderer):
         self.renderer = renderer
         self.device = renderer.device
-        self.arena = MeshArena(self.device, vertex_floats=12)
+        self.arena = MeshArena(self.device, vertex_stride=32)
         self._bg_generation = -1
         self.current_index = 0
         self.hiz_width = self.hiz_height = self.hiz_mip_count = 1

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import gpu_arena
 from gpu_arena import MeshArena, _INDIRECT_FIELDS, _AABB_FIELDS
+from chunk_data import VERTEX_STRIDE
 
 
 class FakeBuffer:
@@ -67,7 +68,11 @@ gpu_arena.wgpu = type("m", (), {"BufferUsage": _Usage()})()
 
 
 def make_chunk(vid, nverts=10, nidx=18):
-    v = np.full((nverts, 12), float(vid), dtype=np.float32)
+    # Build a packed 32-byte/vertex buffer where pos.xyz = vid (so we can
+    # verify the payload landed in the right slot by reading the first float).
+    v = np.zeros((nverts, VERTEX_STRIDE), dtype=np.uint8)
+    pos = v[:, :12].view(np.float32).reshape(nverts, 3)
+    pos[:] = float(vid)
     i = np.arange(nidx, dtype=np.uint32)
     bbox = (vid, 0.0, vid, vid + 1.0, 5.0, vid + 1.0)
     return v, i, bbox
@@ -90,7 +95,7 @@ def check_invariants(a, label):
 
 
 dev = FakeDevice()
-a = MeshArena(dev, vertex_floats=12, initial_slots=4)
+a = MeshArena(dev, vertex_stride=VERTEX_STRIDE, initial_slots=4)
 
 # 1. Fill past initial capacity to force growth.
 for i in range(10):
@@ -120,7 +125,7 @@ assert a.capacity == cap_before, "should have reused freed slots"
 for key, dense in a.dense_of_key.items():
     slot = a.slot_of_dense[dense]
     off = slot * a.slot_verts * a.vertex_itemsize
-    got = np.frombuffer(bytes(a.vertex_buffer.data[off:off + 12 * 4]), dtype=np.float32)
+    got = np.frombuffer(bytes(a.vertex_buffer.data[off:off + 12]), dtype=np.float32)
     assert np.allclose(got, float(key[1])), (
         f"slot {slot} holds {got[0]} but {key} expected {key[1]}")
 print("vertex payloads verified in-slot for all chunks")
@@ -132,7 +137,7 @@ check_invariants(a, "after oversized add")
 for key, dense in a.dense_of_key.items():
     slot = a.slot_of_dense[dense]
     off = slot * a.slot_verts * a.vertex_itemsize
-    got = np.frombuffer(bytes(a.vertex_buffer.data[off:off + 12 * 4]), dtype=np.float32)
+    got = np.frombuffer(bytes(a.vertex_buffer.data[off:off + 12]), dtype=np.float32)
     expect = 999.0 if key == ("big",) else float(key[1])
     assert np.allclose(got, expect), f"{key} corrupted by re-layout: {got[0]} != {expect}"
 print("data survived oversized re-layout (slot_verts=%d)" % a.slot_verts)

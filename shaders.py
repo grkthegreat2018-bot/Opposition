@@ -33,7 +33,7 @@ var s_shadow: sampler_comparison;
 
 struct VertexIn {
     @location(0) pos: vec3<f32>,
-    @location(1) normal: vec3<f32>,
+    @location(1) normal: vec4<f32>,
     @location(2) biome: vec4<f32>,
     @location(3) sc: vec2<f32>,
 };
@@ -446,7 +446,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.pos = u.mvp * vec4<f32>(in.pos, 1.0);
     out.world_pos = in.pos;
-    out.normal = in.normal;
+    out.normal = in.normal.xyz;
     out.color = vec3<f32>(0.0);
     out.biome = in.biome;
     out.sc = in.sc;

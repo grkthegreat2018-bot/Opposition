@@ -33,10 +33,10 @@ _AABB_FIELDS = 8
 class MeshArena:
     """Slot-allocated vertex/index storage plus dense cull metadata."""
 
-    def __init__(self, device, vertex_floats: int = 12, initial_slots: int = 384):
+    def __init__(self, device, vertex_stride: int = 32, initial_slots: int = 384):
         self.device = device
-        self.vertex_floats = vertex_floats
-        self.vertex_itemsize = vertex_floats * 4
+        self.vertex_stride = int(vertex_stride)
+        self.vertex_itemsize = self.vertex_stride
         self.capacity = max(1, int(initial_slots))
 
         # Per-slot capacity, sized from the first chunk we see. Uniform grid_res
@@ -197,13 +197,14 @@ class MeshArena:
     def add(self, key, vertex_data, index_data, bbox):
         """Upload one chunk's mesh into a free slot.
 
-        `vertex_data` must be (V, vertex_floats) float32 and `index_data` a
-        flat uint32 array. Neither is retained after this call.
+        `vertex_data` must be a contiguous byte array of length
+        V*vertex_stride (use chunk_data._pack_vertices to build it) and
+        `index_data` a flat uint32 array. Neither is retained after this call.
         """
         if key in self.dense_of_key:
             self.remove(key)
 
-        vert_count = vertex_data.shape[0]
+        vert_count = vertex_data.nbytes // self.vertex_stride
         index_count = index_data.size
         if (not self.free_slots or vert_count > self.slot_verts
                 or index_count > self.slot_indices):
@@ -219,7 +220,7 @@ class MeshArena:
         queue = self.device.queue
         queue.write_buffer(
             self.vertex_buffer, slot * self.slot_verts * self.vertex_itemsize,
-            np.ascontiguousarray(vertex_data, dtype=np.float32),
+            np.ascontiguousarray(vertex_data),
         )
         queue.write_buffer(
             self.index_buffer, slot * self.slot_indices * 4,

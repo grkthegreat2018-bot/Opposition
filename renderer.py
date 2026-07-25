@@ -120,13 +120,14 @@ class TerrainRenderer:
                 "entry_point": "vs_main",
                 "buffers": [
                     {
-                        # pos (3) + normal (3) + biome (4) + sc (2) = 12 floats/vertex
-                        "array_stride": 12 * 4,
+                        # Packed: pos(f32x3) + normal(snorm8x4) + biome(unorm8x4)
+                        # + sc(f16x2) + 8 bytes pad = 32 bytes/vertex.
+                        "array_stride": 32,
                         "attributes": [
                             {"format": "float32x3", "offset": 0, "shader_location": 0},
-                            {"format": "float32x3", "offset": 3 * 4, "shader_location": 1},
-                            {"format": "float32x4", "offset": 6 * 4, "shader_location": 2},
-                            {"format": "float32x2", "offset": 10 * 4, "shader_location": 3},
+                            {"format": "snorm8x4", "offset": 12, "shader_location": 1},
+                            {"format": "unorm8x4", "offset": 16, "shader_location": 2},
+                            {"format": "float16x2", "offset": 20, "shader_location": 3},
                         ],
                     }
                 ],
@@ -200,8 +201,8 @@ class TerrainRenderer:
                 "entry_point": "vs_main",
                 "buffers": [
                     {
-                        # Reads only pos from the interleaved pos+normal+biome+sc buffer.
-                        "array_stride": 12 * 4,
+                        # Reads only pos from the packed 32-byte/vertex buffer.
+                        "array_stride": 32,
                         "attributes": [
                             {"format": "float32x3", "offset": 0, "shader_location": 0},
                         ],
@@ -252,8 +253,8 @@ class TerrainRenderer:
                 "entry_point": "vs_main",
                 "buffers": [
                     {
-                        # Reads only pos from the interleaved pos+normal+biome+sc buffer.
-                        "array_stride": 12 * 4,
+                        # Reads only pos from the packed 32-byte/vertex buffer.
+                        "array_stride": 32,
                         "attributes": [
                             {"format": "float32x3", "offset": 0, "shader_location": 0},
                         ],

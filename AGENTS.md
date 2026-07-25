@@ -41,7 +41,7 @@ Before running, compile changed modules:
     - Craters (`_apply_craters`): deterministic hash-placed impact craters with raised rims
   - Thermal (`_thermal_erode`) erosion on padded extended grid (seam-safe). Hydraulic and wind erosion disabled — visual effects handled in fragment shader.
   - 4-biome blending (tundra/mountain/desert/forest) via temperature/humidity simplex noise. 4 additional biomes (beach/savanna/swamp/volcanic) computed in-shader.
-  - Per-vertex: position(3) + normal(3) + biome(4) + sediment_curvature(2) = 12 floats.
+  - Per-vertex (packed, 32 bytes): position(float32x3) + normal(snorm8x4) + biome(unorm8x4) + sediment_curvature(float16x2) + 8 bytes pad. Was 48 bytes (12 floats).
   - Domain warp amplitude must stay under ~1.0 noise-input units (see `docs/bug_bed_of_nails.md`).
 - `shaders.py`: WGSL shader source (`SHADER` = terrain PBR shader, `BBOX_SHADER` = position-only depth shader). Extracted from renderer.py.
 - `chunk_data.py`: `_ChunkData` — CPU-side chunk mesh data used to build merged GPU buffers. Extracted from renderer.py.
@@ -64,4 +64,4 @@ Before running, compile changed modules:
 
 - After numba noise + PBR + terrain features: ~880-950 FPS, ~2ms render time, ~0.05ms compute time, ~8% VRAM, ~3-4% GPU.
 - Chunk build: 1.4ms warm (no features), 1.8ms warm (all 4 features). Was 12ms before numba.
-- Vertex buffer: 12 floats/vertex (unchanged). Fragment shader: PBR adds ~15 ALU ops, material details add ~10.
+- Vertex buffer: 32 bytes/vertex (packed: pos f32x3 + normal snorm8x4 + biome unorm8x4 + sc f16x2 + pad). Was 48 bytes. Fragment shader: PBR adds ~15 ALU ops, material details add ~10.
