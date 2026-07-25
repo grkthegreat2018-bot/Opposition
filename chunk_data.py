@@ -2,6 +2,20 @@
 import numpy as np
 
 
+class ChunkRecord:
+    """What the renderer keeps for a chunk once its mesh is on the GPU.
+
+    Only the bounding box is still needed (debug raycast, shadow bounds); the
+    vertex/index arrays are handed to the GPU arena and dropped, which is worth
+    a few hundred MB of resident memory at typical view distances.
+    """
+
+    __slots__ = ("bbox",)
+
+    def __init__(self, bbox):
+        self.bbox = bbox
+
+
 class _ChunkData:
     """Internal CPU data for one chunk, used to build merged GPU buffers."""
 

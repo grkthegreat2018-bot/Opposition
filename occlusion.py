@@ -2,6 +2,7 @@
 import numpy as np
 import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect_count
+from gpu_arena import MeshArena
 
 COPY_SHADER = """
 @group(0) @binding(0) var src_depth: texture_depth_2d;
@@ -122,14 +123,44 @@ class Occlusion:
     def __init__(self, renderer):
         self.renderer = renderer
         self.device = renderer.device
-        self.chunk_count = 0
-        self.keys = []
+        self.arena = MeshArena(self.device, vertex_floats=12)
+        self._bg_generation = -1
         self.current_index = 0
         self.hiz_width = self.hiz_height = self.hiz_mip_count = 1
         self._prev_size = (0, 0)
         self._create_resources()
         self.resize_depth_pyramid(*renderer.get_physical_size())
-        self.rebuild_geometry()
+        self.sync()
+
+    # Geometry storage lives in the arena; expose it under the names the
+    # render passes already use.
+    @property
+    def chunk_count(self):
+        return self.arena.chunk_count
+
+    @property
+    def vertex_buffer(self):
+        return self.arena.vertex_buffer
+
+    @property
+    def index_buffer(self):
+        return self.arena.index_buffer
+
+    @property
+    def aabb_buffer(self):
+        return self.arena.aabb_buffer
+
+    @property
+    def indirect_buffers(self):
+        return self.arena.indirect_buffers
+
+    @property
+    def prepass_indirect_buffer(self):
+        return self.arena.prepass_indirect_buffer
+
+    @property
+    def count_buffer(self):
+        return self.arena.count_buffer
 
     def _create_resources(self):
         self.cull_uniform_buffer = self.device.create_buffer(
@@ -215,59 +246,26 @@ class Occlusion:
                 entries=[{"binding": 0, "resource": self.hiz_mip_views[i - 1]},
                          {"binding": 1, "resource": self.hiz_mip_views[i]}],
             ))
-        if getattr(self, "indirect_buffers", None):
+        if self.arena.vertex_buffer is not None:
             self._create_cull_bind_groups()
 
-    def rebuild_geometry(self):
-        self.keys = sorted(self.renderer.chunk_meshes.keys())
-        chunks = [self.renderer.chunk_meshes[k] for k in self.keys]
-        self.chunk_count = len(chunks)
-        if self.chunk_count == 0:
-            vertex_data = np.zeros((1, 12), dtype=np.float32)
-            index_data = np.zeros(1, dtype=np.uint32)
-            aabb_data = np.zeros((1, 8), dtype=np.float32)
-            indirect_data = np.zeros((1, 5), dtype=np.uint32)
-            count_data = np.array([0], dtype=np.uint32)
-        else:
-            vertex_data = np.concatenate([c.vertex_data for c in chunks])
-            index_data = np.concatenate([c.index_data for c in chunks])
-            aabb_data = np.zeros((self.chunk_count, 8), dtype=np.float32)
-            indirect_data = np.zeros((self.chunk_count, 5), dtype=np.uint32)
-            count_data = np.array([self.chunk_count], dtype=np.uint32)
-            first_index = base_vertex = 0
-            for i, c in enumerate(chunks):
-                aabb_data[i, :3] = c.bbox[:3]
-                aabb_data[i, 4:7] = c.bbox[3:]
-                indirect_data[i, 0] = c.index_count
-                indirect_data[i, 1] = 1
-                indirect_data[i, 2] = first_index
-                indirect_data[i, 3] = base_vertex
-                indirect_data[i, 4] = 0
-                first_index += c.index_count
-                base_vertex += c.vertex_count
-        self.vertex_buffer = self.device.create_buffer_with_data(
-            data=vertex_data, usage=wgpu.BufferUsage.VERTEX,
-        )
-        self.index_buffer = self.device.create_buffer_with_data(
-            data=index_data, usage=wgpu.BufferUsage.INDEX,
-        )
-        self.aabb_buffer = self.device.create_buffer_with_data(
-            data=aabb_data, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-        )
-        self.indirect_buffers = [
-            self.device.create_buffer_with_data(
-                data=indirect_data,
-                usage=wgpu.BufferUsage.INDIRECT | wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST,
-            ) for _ in range(2)
-        ]
-        # Full-geometry buffer for the depth prepass so the HZB is always complete.
-        self.prepass_indirect_buffer = self.device.create_buffer_with_data(
-            data=indirect_data, usage=wgpu.BufferUsage.INDIRECT | wgpu.BufferUsage.COPY_DST,
-        )
-        self.count_buffer = self.device.create_buffer_with_data(
-            data=count_data, usage=wgpu.BufferUsage.INDIRECT | wgpu.BufferUsage.COPY_DST,
-        )
-        self._create_cull_bind_groups()
+    def add_chunk(self, key, vertex_data, index_data, bbox):
+        """Stream one chunk's mesh into the arena (no full rebuild)."""
+        self.arena.add(key, vertex_data, index_data, bbox)
+
+    def remove_chunk(self, key):
+        self.arena.remove(key)
+
+    def sync(self):
+        """Flush pending arena writes and refresh bind groups if buffers moved.
+
+        Cheap enough to call every frame: when nothing changed it does no GPU
+        work at all.
+        """
+        self.arena.flush()
+        if self.arena.generation != self._bg_generation:
+            self._create_cull_bind_groups()
+            self._bg_generation = self.arena.generation
 
     def _create_cull_bind_groups(self):
         self.cull_bgs = []

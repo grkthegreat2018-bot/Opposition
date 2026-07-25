@@ -7,7 +7,7 @@ import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect_count
 
 from camera import look_at, orthographic
-from chunk_data import _ChunkData
+from chunk_data import _ChunkData, ChunkRecord
 from occlusion import Occlusion
 from shaders import SHADER, BBOX_SHADER
 from water import WaterRenderer
@@ -82,7 +82,6 @@ class TerrainRenderer:
         self.clouds = CloudRenderer(self)
 
         self.chunk_meshes = {}
-        self._chunks_dirty = False
         self.occlusion = Occlusion(self)
 
     def _create_pipeline(self):
@@ -421,30 +420,28 @@ class TerrainRenderer:
         for c in chunks:
             mesh = c.mesh
             if mesh is not None and mesh["indices"].size > 0:
-                self.chunk_meshes[c.key()] = _ChunkData(
-                    mesh,
-                    getattr(c, "bbox", None),
-                )
-            # Free the original mesh from the ChunkManager copy once uploaded;
-            # the renderer keeps its own interleaved CPU copy for buffer rebuilds.
+                key = c.key()
+                cd = _ChunkData(mesh, getattr(c, "bbox", None))
+                # Hand the interleaved data straight to the arena, which copies
+                # it into its own slot; nothing is retained on the CPU here.
+                self.occlusion.add_chunk(key, cd.vertex_data, cd.index_data, cd.bbox)
+                self.chunk_meshes[key] = ChunkRecord(cd.bbox)
             c.mesh = None
-        self._chunks_dirty = True
         self._shadow_bounds_dirty = True
 
     def remove_chunks(self, keys):
         """Remove GPU buffers for the given chunk keys."""
         for key in keys:
-            self.chunk_meshes.pop(key, None)
-        self._chunks_dirty = True
+            if self.chunk_meshes.pop(key, None) is not None:
+                self.occlusion.remove_chunk(key)
         self._shadow_bounds_dirty = True
 
     def draw(self, camera_view, camera_proj, light_dir=(0.0, 1.0, 0.0), camera_pos=None,
              fog_density=0.0, fog_start=0.0, fog_color=None, sun_color=None, sky_params=None,
              debug_hud=None, inv_view_proj=None):
         self._resize_depth()
-        if self._chunks_dirty:
-            self.occlusion.rebuild_geometry()
-            self._chunks_dirty = False
+        # Flushes any pending arena writes; a no-op when no chunks changed.
+        self.occlusion.sync()
 
         width, height = self.get_physical_size()
         self.occlusion.resize_depth_pyramid(width, height)
