@@ -3,6 +3,10 @@ import numpy as np
 import numba
 from terrain._noise_core import _snoise2_scalar, _fbm_grid, _PERM2, _GRAD2
 from terrain.biomes import _biome_modulate, _BIOME_AMPLITUDE, _BIOME_FLATNESS, _BIOME_RIDGE, _BIOME_WARP, _BIOME_DETAIL, _BIOME_CONTINENTAL
+from terrain.continental import (
+    _continental_mask, _continental_elevation,
+    _coastal_ridge_weight, _ocean_flatness,
+)
 
 # Per-octave rotation matrix ~37° (det=1) is inlined in _ridged_fbm_grid.
 
@@ -165,6 +169,14 @@ def _compute_height(
     detail_weight: float = 0.12,
     ridge_detail_weight: float = 0.08,
     biome=None,
+    continental_freq: float = 0.0002,
+    sea_level: float = 0.0,
+    ocean_depth: float = 18.0,
+    land_boost: float = 12.0,
+    coastal_peak: float = 0.65,
+    coastal_width: float = 0.18,
+    coastal_mountain_strength: float = 0.7,
+    ocean_transition: float = 0.06,
 ):
     """Return a height field for given world x/z coordinates.
 
@@ -215,9 +227,17 @@ def _compute_height(
         x = x + (wx1 + 0.3 * wx2) * wp
         z = z + (wz1 + 0.3 * wz2) * wp
 
-    # Continental low-frequency layer: very low octave noise on the un-warped
-    # coordinates adds broad rolling hills and breaks up repetition across long
-    # view distances, without imposing a new ridge spacing.
+    # --- Continental mask: large-scale land/ocean pattern ---
+    # Computed on the pre-warp coordinates so it's not distorted by domain
+    # warp. This drives ocean depth, coastal mountains, and terrain flatness.
+    cont_mask = _continental_mask(xx, zz, continental_freq, seed)
+    cont_elev = _continental_elevation(cont_mask, sea_level, ocean_depth, land_boost)
+    coastal_rw = _coastal_ridge_weight(
+        cont_mask, coastal_peak, coastal_width, coastal_mountain_strength)
+    ocean_flat = _ocean_flatness(cont_mask, 0.40, ocean_transition)
+
+    # Regional low-frequency variation on land (broad rolling hills). The
+    # continental mask handles oceans/mountains; this adds interior variety.
     continental = np.zeros_like(xx, dtype=np.float32)
     _fbm_grid(
         xx * freq * 0.25 + seed * 250.0,
@@ -252,4 +272,14 @@ def _compute_height(
     _fbm_grid(x * 9.0, z * 9.0, micro,
               3, persistence * 0.6, lacunarity, _PERM2, _GRAD2)
 
-    return (h + rw * ridge + ridge_detail_weight * ridge_detail + dw * detail + 0.03 * micro + cont * continental * 0.4) * scale * amp
+    # --- Compose final heightfield ---
+    # Terrain detail (fBm + ridges + detail) is flattened underwater by
+    # ocean_flat (0 in deep ocean → smooth seafloor). Ridge weight gets an
+    # extra coastal multiplier so mountains form chains along continental
+    # edges rather than uniformly everywhere. The continental elevation
+    # provides the ocean/land base, and the regional fBm adds interior variety.
+    terrain = (h + (rw + coastal_rw) * ridge
+               + ridge_detail_weight * ridge_detail
+               + dw * detail + 0.03 * micro)
+    return (cont_elev + ocean_flat * terrain * scale * amp
+            + cont * continental * 0.4 * scale)

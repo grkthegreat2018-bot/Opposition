@@ -31,9 +31,11 @@ Before running, compile changed modules:
   - `terrain/erosion.py`: thermal, hydraulic (numba), wind erosion + Gaussian smoothing.
   - `terrain/manager.py`: `ChunkManager` — async process-pool chunk building, streaming, caching.
   - `terrain/biomes.py`, `terrain/_noise_core.py`: biome blending + numba simplex noise core.
+  - `terrain/continental.py`: continental-scale land/ocean mask, coastal mountain chains, ocean flatness (all seam-safe, numba-jit'd).
   - **Numba-jit'd 2D simplex noise** (`_snoise2_scalar`, `_snoise2_grid`, `_fbm_grid`) — bit-identical to `noise.snoise2`, ~10x faster than `np.vectorize`. See `docs/feature_log_perf_biomes_pbr.md`.
   - Derivative-erosion fBm (`_fbm_eroded` / `_fbm_eroded_grid`) with slope-aware weighting `1/(1+k*|d|^2)` to suppress high-frequency detail on steep slopes.
   - Ridged fBm (`_ridged_fbm_rotated` / `_ridged_fbm_grid`) with per-octave rotation and smootherstep peaks for mountain ridges.
+  - **Continental multi-scale** (`terrain/continental.py`): very low-frequency mask [0,1] drives oceans (mask<0.4 → flat seafloor below sea level), coastal mountain chains (Gaussian peak at mask~0.65), and interior plains. All seam-safe, numba-jit'd.
   - **4 large-scale terrain features** (all seam-safe, pure functions of world position, numba-jit'd):
     - Rivers (`_apply_rivers`): V-valley carving along noise-based river network
     - Plateaus (`_apply_plateaus`): flat-top mesas with cliff edges

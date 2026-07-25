@@ -34,6 +34,40 @@ class NoiseConfig:
 
 
 @dataclass(frozen=True)
+class ContinentalConfig:
+    """Large-scale landmasses: oceans, coastal mountains, interior plains.
+
+    The continental mask is a very low-frequency noise field in [0, 1]:
+      mask < 0.40  → ocean (flat seafloor below sea_level)
+      0.40-0.55    → continental shelf / coast
+      0.55-0.75    → coastal highlands (mountain chains)
+      mask > 0.75  → continental interior (gentler terrain)
+
+    All parameters are seam-safe (pure functions of world position).
+    """
+
+    # Frequency of the continental mask noise. ~40x lower than base terrain
+    # → landmasses are 500-2000m across at the default settings.
+    continental_freq: float = 0.0002
+    # Height of the ocean surface. Terrain below this is underwater.
+    sea_level: float = 0.0
+    # How far below sea_level the deep ocean floor drops.
+    ocean_depth: float = 18.0
+    # Base elevation boost for land above sea_level (continental interior).
+    land_boost: float = 12.0
+    # Coastal mountain chain parameters. Mountains peak at ``coastal_peak``
+    # (mask value) with a Gaussian falloff of ``coastal_width``.
+    coastal_peak: float = 0.65
+    coastal_width: float = 0.18
+    # Strength of the coastal mountain effect (0 = no coastal mountains,
+    # 1 = full ridge weight at the coast). Scales the ridge multiplier.
+    coastal_mountain_strength: float = 0.7
+    # Width of the ocean-to-land amplitude transition (in mask units).
+    # Within this band, terrain amplitude ramps from 0 (flat ocean) to 1.
+    ocean_transition: float = 0.06
+
+
+@dataclass(frozen=True)
 class ErosionConfig:
     """Post-process passes applied to the heightfield."""
 
@@ -80,7 +114,7 @@ class StreamingConfig:
 
 @dataclass(frozen=True)
 class CameraConfig:
-    start_pos: tuple = (0.0, 8.0, 25.0)
+    start_pos: tuple = (500.0, 50.0, 500.0)
     start_yaw: float = -np.pi / 2
     start_pitch: float = 0.0
     fov: float = 75.0
@@ -147,6 +181,7 @@ class TimeConfig:
 @dataclass(frozen=True)
 class Config:
     noise: NoiseConfig = field(default_factory=NoiseConfig)
+    continental: ContinentalConfig = field(default_factory=ContinentalConfig)
     erosion: ErosionConfig = field(default_factory=ErosionConfig)
     features: FeatureConfig = field(default_factory=FeatureConfig)
     streaming: StreamingConfig = field(default_factory=StreamingConfig)
@@ -158,10 +193,19 @@ class Config:
 
     def chunk_manager_kwargs(self) -> dict:
         """Flatten into the keyword arguments ChunkManager expects."""
-        n, e, f, s = self.noise, self.erosion, self.features, self.streaming
+        n, c, e, f, s = (self.noise, self.continental, self.erosion,
+                         self.features, self.streaming)
         return {
             **asdict(s),
             **asdict(n),
+            "continental_freq": c.continental_freq,
+            "sea_level": c.sea_level,
+            "ocean_depth": c.ocean_depth,
+            "land_boost": c.land_boost,
+            "coastal_peak": c.coastal_peak,
+            "coastal_width": c.coastal_width,
+            "coastal_mountain_strength": c.coastal_mountain_strength,
+            "ocean_transition": c.ocean_transition,
             "erosion_iters": e.iters,
             "erosion_talus": e.talus,
             "erosion_factor": e.factor,
@@ -189,6 +233,7 @@ class Config:
 DEFAULT = Config()
 
 __all__ = [
-    "Config", "NoiseConfig", "ErosionConfig", "FeatureConfig", "StreamingConfig",
-    "CameraConfig", "FogConfig", "DisplayConfig", "TimeConfig", "DEFAULT", "replace",
+    "Config", "NoiseConfig", "ContinentalConfig", "ErosionConfig",
+    "FeatureConfig", "StreamingConfig", "CameraConfig", "FogConfig",
+    "DisplayConfig", "TimeConfig", "DEFAULT", "replace",
 ]

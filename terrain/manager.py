@@ -30,6 +30,14 @@ class ChunkManager:
         ridge_weight: float = 0.35,
         detail_weight: float = 0.12,
         biome_freq: float = 0.0015,
+        continental_freq: float = 0.0002,
+        sea_level: float = 0.0,
+        ocean_depth: float = 18.0,
+        land_boost: float = 12.0,
+        coastal_peak: float = 0.65,
+        coastal_width: float = 0.18,
+        coastal_mountain_strength: float = 0.7,
+        ocean_transition: float = 0.06,
         erosion_iters: int = 0,
         erosion_talus: float = 1.5,
         erosion_factor: float = 0.25,
@@ -64,6 +72,14 @@ class ChunkManager:
         self.ridge_weight = ridge_weight
         self.detail_weight = detail_weight
         self.biome_freq = biome_freq
+        self.continental_freq = continental_freq
+        self.sea_level = sea_level
+        self.ocean_depth = ocean_depth
+        self.land_boost = land_boost
+        self.coastal_peak = coastal_peak
+        self.coastal_width = coastal_width
+        self.coastal_mountain_strength = coastal_mountain_strength
+        self.ocean_transition = ocean_transition
         self.erosion_iters = erosion_iters
         self.erosion_talus = erosion_talus
         self.erosion_factor = erosion_factor
@@ -130,6 +146,14 @@ class ChunkManager:
             "ridge_weight": self.ridge_weight,
             "detail_weight": self.detail_weight,
             "biome_freq": self.biome_freq,
+            "continental_freq": self.continental_freq,
+            "sea_level": self.sea_level,
+            "ocean_depth": self.ocean_depth,
+            "land_boost": self.land_boost,
+            "coastal_peak": self.coastal_peak,
+            "coastal_width": self.coastal_width,
+            "coastal_mountain_strength": self.coastal_mountain_strength,
+            "ocean_transition": self.ocean_transition,
             "erosion_iters": self.erosion_iters,
             "erosion_talus": self.erosion_talus,
             "erosion_factor": self.erosion_factor,

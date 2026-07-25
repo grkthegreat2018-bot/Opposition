@@ -60,7 +60,7 @@ fn wave_deriv(p: vec2<f32>, t: f32) -> vec2<f32> {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    let WATER_LEVEL = -1.0;
+    let WATER_LEVEL = 0.0;
     var world = vec3<f32>(in.pos.x, WATER_LEVEL, in.pos.z);
     // Keep the water patch centered under the camera.
     world.x += u.camera_pos.x;
