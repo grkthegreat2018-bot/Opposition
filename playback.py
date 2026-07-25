@@ -61,10 +61,12 @@ class PlaybackApp(App):
         if benchmark:
             self.profiler.record_all = True
 
-        # Reset camera to known initial state.
-        self.camera.pos = np.array([0.0, 8.0, 25.0], dtype=np.float32)
-        self.camera.yaw = -np.pi / 2
-        self.camera.pitch = 0.0
+        # Reset camera to the config's start position (same as main.py so
+        # playback sees the same inland terrain, not the ocean at origin).
+        cam = self.cfg.camera
+        self.camera.pos = np.array(cam.start_pos, dtype=np.float32)
+        self.camera.yaw = cam.start_yaw
+        self.camera.pitch = cam.start_pitch
         self.camera.keys.clear()
 
         # Playback needs the chunk manager synchronously (it sets radius
