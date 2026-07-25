@@ -10,6 +10,8 @@ import numpy as np
 import glfw
 from rendercanvas.glfw import RenderCanvas, loop
 
+import config
+from config import Config
 from terrain import ChunkManager
 from camera import Camera
 from renderer import TerrainRenderer
@@ -64,7 +66,7 @@ def center_window(canvas):
     glfw.set_window_pos(window, mx + (mode.size.width - w) // 2, my + (mode.size.height - h) // 2)
 
 
-def _prewarm_numba():
+def _prewarm_numba(cfg):
     """Build one tiny chunk synchronously to compile + cache all numba-jit'd
     functions in the main process. Worker processes then load the disk cache
     instead of recompiling (~200ms saved per worker on first run).
@@ -72,73 +74,37 @@ def _prewarm_numba():
     import time as _t
     t0 = _t.perf_counter()
     from terrain.chunk import Chunk
-    c = Chunk(
-        cx=0, cy=0, cz=0, size=32.0, grid_res=8, seed=42,
-        scale=25.0, freq=0.008, octaves=7, persistence=0.5, lacunarity=2.13,
-        warp_scale=0.3, warp_amp=0.4, ridge_weight=0.35, detail_weight=0.12,
-        biome_freq=0.0015, erosion_iters=3, erosion_talus=1.2, erosion_factor=0.22,
-        hydraulic_droplets=2000, wind_erode_iters=3,
-        river_depth=2.5, plateau_strength=0.6, canyon_depth=4.0, crater_strength=0.5,
-        glacial_strength=0.8, smooth_strength=0.35,
-    )
-    c.build()
+    # Same tuning as real chunks (so the same jitted specialisations are
+    # compiled), just on a tiny grid.
+    Chunk(**cfg.prewarm_chunk_kwargs()).build()
     print(f"Numba pre-warm: {_t.perf_counter() - t0:.2f}s (cached to disk for workers)")
 
 
 class App:
-    def __init__(self):
-        _prewarm_numba()
-        self.chunk_manager = ChunkManager(
-            chunk_size=32.0,
-            grid_res=48,
-            radius=8,
-            min_radius=8,
-            max_radius=10,
-            y_radius=0,
-            seed=42,
-            scale=25.0,
-            freq=0.008,
-            octaves=7,
-            persistence=0.5,
-            # Non-integer lacunarity breaks the perfect 2x octave grid alignment
-            # that produces visible repeating noise patterns at distance.
-            lacunarity=2.13,
-            warp_scale=0.3,
-            warp_amp=0.4,
-            # Light thermal erosion rounds off sharp polygon edges and produces
-            # natural-looking talus slopes without flattening the terrain.
-            erosion_iters=3,
-            erosion_talus=1.2,
-            erosion_factor=0.22,
-            # Hydraulic particle erosion carves V-valleys and gullies that
-            # thermal alone cannot. ~2000 droplets on a 50x50 extended grid.
-            hydraulic_droplets=2000,
-            # Wind erosion elongates desert features into dune ridges.
-            wind_erode_iters=3,
-            # Large-scale terrain features (seam-safe, pure functions of world
-            # position). Strength=0 disables each. Tune to taste.
-            river_depth=2.5,
-            plateau_strength=0.6,
-            canyon_depth=4.0,
-            crater_strength=0.5,
-            # Glacial valley carving: U-shaped valleys in high-altitude terrain.
-            # Seam-safe. 0=off, 1.0=strong carving.
-            glacial_strength=0.8,
-            # Gaussian smoothing pass to flatten tiny spikes/edges. 0=off, 0.3=gentle.
-            smooth_strength=0.35,
-            max_builds_per_frame=6,
-            target_compute_ms=4.0,
-        )
+    def __init__(self, cfg: Config | None = None):
+        self.cfg = cfg or config.DEFAULT
+        cfg = self.cfg
+        _prewarm_numba(cfg)
+        self.chunk_manager = ChunkManager(**cfg.chunk_manager_kwargs())
 
-        self.canvas = RenderCanvas(size=(1280, 720), title="Oposition - Vulkan Terrain", update_mode="continuous")
-        set_fullscreen(self.canvas)
+        disp = cfg.display
+        self.canvas = RenderCanvas(size=(disp.width, disp.height), title=disp.title,
+                                   update_mode="continuous")
+        if disp.fullscreen:
+            set_fullscreen(self.canvas)
+        else:
+            center_window(self.canvas)
         self.renderer = TerrainRenderer(self.canvas)
 
-        self.camera = Camera(pos=(0.0, 8.0, 25.0), yaw=-np.pi / 2, pitch=0.0)
+        cam = cfg.camera
+        self.camera = Camera(pos=cam.start_pos, yaw=cam.start_yaw, pitch=cam.start_pitch,
+                             fov=cam.fov, near=cam.near)
+        self.camera.speed = cam.speed
+        self.camera.shift_mult = cam.shift_mult
+        self.camera.sensitivity = cam.sensitivity
 
         self._last_time = time.time()
         self._mouse_locked = False
-        self._last_mouse = None
 
         # Debug HUD: F1 toggle, F2 freeze chunks, F3 mark wrongfully culled chunk.
         self.debug_hud = DebugHUD(self.renderer.device, self.renderer.format)
@@ -146,13 +112,10 @@ class App:
         self._chunks_frozen = False
         self._marked_chunks = []  # log of (chunk_key, cam_pos, yaw, pitch)
 
-        # Day/night cycle: time_of_day in hours [0, 24). day_length_sec is how
-        # many real seconds correspond to one full 24-hour cycle. 600s = 10 min
-        # per day, slow enough to enjoy each phase without being static.
-        self.time_of_day = 9.0  # start at 9am (mid-morning light)
-        self.day_length_sec = 600.0
+        self.time_of_day = cfg.time.start_hour
+        self.day_length_sec = cfg.time.day_length_sec
 
-        self.profiler = PerformanceProfiler(log_interval=1.0)
+        self.profiler = PerformanceProfiler(log_interval=cfg.profiler_log_interval)
 
         self._bind_events()
         self._grab_mouse()
@@ -288,7 +251,7 @@ class App:
         # Compute sky parameters from time of day.
         sky = compute_sky_params(self.time_of_day)
         # Use the brighter of sun/moon as the primary light source.
-        if sky["sun_intensity"] > 0.01:
+        if sky["sun_intensity"] > self.cfg.time.night_threshold:
             light = sky["sun_dir"]
             sun_color = sky["sun_color"] * sky["sun_intensity"]
         else:
@@ -299,20 +262,12 @@ class App:
         # depth-friendly range. Fog fades the chunk edge to the sky color.
         # Extra margin for the cloud plane (4000m wide centered on camera).
         render_distance = self.chunk_manager.radius * self.chunk_manager.chunk_size
-        self.camera.far = max(2500.0, render_distance * 1.5)
+        self.camera.far = max(self.cfg.camera.min_far, render_distance * 1.5)
         proj = self.camera.projection_matrix(aspect)
 
-        # Altitude-aware fog: push fog outward when high up so terrain below
-        # stays visible. At ground level, standard fog values apply.
-        # fog_start is kept close to the loaded-terrain edge (render_distance)
-        # so chunks that ARE loaded remain visible. Previously fog_start sat
-        # at 0.6x render_distance, fogging out the outer ~25% of loaded
-        # chunks and making it look like chunks weren't loading.
-        altitude = float(self.camera.pos[1])
-        alt_factor = min(max((altitude - 20.0) / 130.0, 0.0), 1.0)
-        fog_start = render_distance * (0.8 + 0.15 * alt_factor)
-        fog_end = render_distance * (1.4 + 0.4 * alt_factor)
-        fog_density = 4.605 / max(fog_end - fog_start, 1.0)
+        fog_density, fog_start = self.cfg.fog.params(
+            render_distance, float(self.camera.pos[1]),
+        )
         fog_color = sky["sky_horizon"]  # fog matches horizon sky color
 
         t0 = time.perf_counter()
