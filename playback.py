@@ -67,6 +67,10 @@ class PlaybackApp(App):
         self.camera.pitch = 0.0
         self.camera.keys.clear()
 
+        # Playback needs the chunk manager synchronously (it sets radius
+        # below); block until the async prewarm finishes.
+        self._wait_for_prewarm()
+
         # Override chunk radius for playback — slightly wider than default
         # so terrain doesn't vanish when panning at altitude, but not so
         # wide it overwhelms memory (radius 12 crashed the window).

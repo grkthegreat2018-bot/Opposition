@@ -160,6 +160,22 @@ class App:
         # Initial chunk load
         self._update_chunks()
 
+    def _wait_for_prewarm(self):
+        """Block until the prewarm thread finishes, then finish startup.
+
+        Used by subclasses (e.g. PlaybackApp) that need the chunk manager
+        synchronously in __init__ rather than waiting for the first draw.
+        """
+        if self._prewarm_done:
+            if self.chunk_manager is None:
+                self._finish_startup()
+            return
+        if self._prewarm_thread is not None:
+            self._prewarm_thread.join()
+            self._prewarm_thread = None
+        self._prewarm_done = True
+        self._finish_startup()
+
     def _bind_events(self):
         self.canvas.add_event_handler(self._on_key_down, "key_down")
         self.canvas.add_event_handler(self._on_key_up, "key_up")
