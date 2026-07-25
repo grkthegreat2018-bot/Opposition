@@ -40,6 +40,7 @@ class Chunk:
         lacunarity: float = 2.0,
         warp_scale: float = 0.3,
         warp_amp: float = 3.0,
+        level: int = 0,
         ridge_weight: float = 0.35,
         detail_weight: float = 0.12,
         biome_freq: float = 0.0015,
@@ -72,6 +73,7 @@ class Chunk:
         self.cz = cz
         self.size = size
         self.grid_res = grid_res
+        self.level = level
         self.seed = seed
         self.scale = scale
         self.freq = freq
@@ -106,6 +108,11 @@ class Chunk:
         self.mesh = None
 
     def key(self):
+        # LOD chunks use (cx, cz, level) as their identity; uniform-grid
+        # chunks use (cx, cy, cz). The level field distinguishes them so
+        # the renderer and chunk manager can store them in the same dict.
+        if self.level > 0:
+            return (self.cx, self.cz, self.level)
         return (self.cx, self.cy, self.cz)
 
     def bounds(self):
@@ -256,9 +263,21 @@ class Chunk:
         # This is the standard game-industry defence against terrain gaps.
         # Skirt depth scales with the chunk's height range so cliffs between
         # high and low neighbouring chunks are always fully covered.
+        # For LOD chunks (level > 0), the skirt must also cover the height
+        # delta between this chunk's coarse edge sampling and a finer
+        # neighbor's detailed edge sampling. The delta grows with the level
+        # difference and the terrain amplitude (scale).
         perim_heights = h.reshape(n, n)
         h_range = float(perim_heights.max() - perim_heights.min())
-        skirt_depth = np.float32(max(8.0, h_range * 0.5 + 4.0))
+        if self.level > 0:
+            # LOD chunk: add extra skirt depth proportional to the level
+            # and terrain scale. A level-L chunk samples the heightfield
+            # at 2^L coarser resolution than level-0, so the edge height
+            # can differ from a level-0 neighbor by up to ~scale * 2^L.
+            lod_skirt = self.scale * (2 ** self.level) * 0.5
+            skirt_depth = np.float32(max(8.0, h_range * 0.5 + 4.0, lod_skirt))
+        else:
+            skirt_depth = np.float32(max(8.0, h_range * 0.5 + 4.0))
         # Perimeter vertex indices in order (clockwise when viewed from +Y).
         perim = []
         perim += list(range(0, n))                      # top row (z=z0)

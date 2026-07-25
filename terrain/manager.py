@@ -1,10 +1,12 @@
 """Chunk lifecycle management: async building, caching, streaming around camera."""
 import atexit
+import math
 import os
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 from terrain.chunk import Chunk, _build_chunk
+from terrain.quadtree import select_quadtree, neighbor_levels
 
 
 class ChunkManager:
@@ -52,6 +54,10 @@ class ChunkManager:
         glacial_strength: float = 0.0,
         max_builds_per_frame: int = 3,
         target_compute_ms: float = 4.0,
+        use_lod: bool = False,
+        lod_factor: float = 2.0,
+        lod_max_level: int = 4,
+        lod_render_distance: float = 400.0,
     ):
         self.chunk_size = chunk_size
         if cell_size is not None:
@@ -61,6 +67,10 @@ class ChunkManager:
         self.radius = radius
         self.min_radius = min_radius
         self.max_radius = max_radius
+        self.use_lod = use_lod
+        self.lod_factor = lod_factor
+        self.lod_max_level = lod_max_level
+        self.lod_render_distance = lod_render_distance
         self.y_radius = y_radius
         self.seed = seed
         self.scale = scale
@@ -125,18 +135,58 @@ class ChunkManager:
     def _dist_to_cam(self, key, cx, cy, cz):
         # Squared 3-D distance for priority; height matters for ordering but does
         # not cull the chunk from being loaded.
+        if self.use_lod:
+            # LOD key: (cx, cz, level). Use the chunk's center for distance.
+            level = key[2]
+            size = self.chunk_size * (2 ** level)
+            kx = key[0] * size + size * 0.5
+            kz = key[1] * size + size * 0.5
+            dx = kx - cx * self.chunk_size
+            dz = kz - cz * self.chunk_size
+            return dx * dx + dz * dz
         dx = key[0] - cx
         dy = key[1] - cy
         dz = key[2] - cz
         return dx * dx + dy * dy + dz * dz
 
     def _build_spec(self, key):
+        if self.use_lod:
+            # LOD key: (cx, cz, level). Size scales with level.
+            cx, cz, level = key
+            size = self.chunk_size * (2 ** level)
+            return {
+                "cx": cx, "cy": 0, "cz": cz,
+                "size": size, "grid_res": self.grid_res,
+                "level": level,
+                "seed": self.seed, "scale": self.scale,
+                "freq": self.freq, "octaves": self.octaves,
+                "persistence": self.persistence, "lacunarity": self.lacunarity,
+                "warp_scale": self.warp_scale, "warp_amp": self.warp_amp,
+                "ridge_weight": self.ridge_weight, "detail_weight": self.detail_weight,
+                "biome_freq": self.biome_freq,
+                "continental_freq": self.continental_freq,
+                "sea_level": self.sea_level, "ocean_depth": self.ocean_depth,
+                "land_boost": self.land_boost, "coastal_peak": self.coastal_peak,
+                "coastal_width": self.coastal_width,
+                "coastal_mountain_strength": self.coastal_mountain_strength,
+                "ocean_transition": self.ocean_transition,
+                "ocean_detail_floor": self.ocean_detail_floor,
+                "erosion_iters": self.erosion_iters, "erosion_talus": self.erosion_talus,
+                "erosion_factor": self.erosion_factor,
+                "hydraulic_droplets": self.hydraulic_droplets,
+                "wind_erode_iters": self.wind_erode_iters,
+                "river_depth": self.river_depth, "plateau_strength": self.plateau_strength,
+                "canyon_depth": self.canyon_depth, "crater_strength": self.crater_strength,
+                "smooth_strength": self.smooth_strength,
+                "glacial_strength": self.glacial_strength,
+            }
         return {
             "cx": key[0],
             "cy": key[1],
             "cz": key[2],
             "size": self.chunk_size,
             "grid_res": self.grid_res,
+            "level": 0,
             "seed": self.seed,
             "scale": self.scale,
             "freq": self.freq,
@@ -194,31 +244,90 @@ class ChunkManager:
         cz = self.chunk_coord(pos[2])
         removed = []
 
-        if (cx, cy, cz) != (self._last_cx, self._last_cy, self._last_cz) or self.radius != self._last_radius:
-            self._last_cx, self._last_cy, self._last_cz = cx, cy, cz
-            self._last_radius = self.radius
+        if self.use_lod:
+            # LOD mode: quantize the camera position to the base chunk grid
+            # so the quadtree only re-evaluates when the camera crosses a
+            # full base-chunk boundary (32m). This prevents rapid chunk
+            # add/remove churn at LOD boundaries when the camera moves
+            # slowly, which causes visible flickering.
+            qx = int(math.floor(pos[0] / self.chunk_size))
+            qz = int(math.floor(pos[2] / self.chunk_size))
+            lqx = getattr(self, '_last_qx', None)
+            lqz = getattr(self, '_last_qz', None)
+            needs_rebuild = (lqx != qx or lqz != qz)
+        else:
+            needs_rebuild = (
+                (cx, cy, cz) != (self._last_cx, self._last_cy, self._last_cz)
+                or self.radius != self._last_radius)
 
-            needed = set()
-            current_columns = set()
-            for dx in range(-self.radius, self.radius + 1):
-                for dz in range(-self.radius, self.radius + 1):
-                    if dx * dx + dz * dz > self.radius * self.radius:
-                        continue
-                    col_cx = cx + dx
-                    col_cz = cz + dz
-                    current_columns.add((col_cx, col_cz))
-                    # One heightfield chunk per xz column.
-                    needed.add((col_cx, 0, col_cz))
+        if needs_rebuild:
+            if self.use_lod:
+                self._last_qx = qx
+                self._last_qz = qz
+                # Use the quantized camera position for quadtree selection.
+                # This makes the selection deterministic per grid cell and
+                # prevents the quadtree boundary from shifting within a cell.
+                cam_x = (qx + 0.5) * self.chunk_size
+                cam_z = (qz + 0.5) * self.chunk_size
+                nodes = select_quadtree(
+                    cam_x, cam_z, self.chunk_size,
+                    self.lod_render_distance, self.lod_factor,
+                    self.lod_max_level)
+                needed = set()
+                current_columns = set()
+                for ncx, ncz, level, size in nodes:
+                    needed.add((ncx, ncz, level))
+                    current_columns.add((ncx, ncz))
+            else:
+                self._last_cx, self._last_cy, self._last_cz = cx, cy, cz
+                self._last_radius = self.radius
+
+                needed = set()
+                current_columns = set()
+                for dx in range(-self.radius, self.radius + 1):
+                    for dz in range(-self.radius, self.radius + 1):
+                        if dx * dx + dz * dz > self.radius * self.radius:
+                            continue
+                        col_cx = cx + dx
+                        col_cz = cz + dz
+                        current_columns.add((col_cx, col_cz))
+                        needed.add((col_cx, 0, col_cz))
 
             # Keep the surface y cache bounded to columns currently in view.
             self._surface_y_cache = {
                 k: v for k, v in self._surface_y_cache.items() if k in current_columns
             }
 
-            # Remove chunks that are no longer needed
-            removed = [key for key in self.chunks if key not in needed]
-            for key in removed:
-                del self.chunks[key]
+            if self.use_lod:
+                # LOD mode: delayed removal. Chunks that leave the needed set
+                # are not removed immediately — they're kept in the renderer
+                # until their replacement (a coarser or finer chunk covering
+                # the same area) is built and uploaded. This prevents gaps
+                # from appearing during LOD transitions.
+                # We track stale chunks by key; they're removed once a new
+                # chunk that overlaps their area is uploaded.
+                new_stale = {key: 0 for key in self.chunks if key not in needed}
+                # Merge with existing stale set (preserve age counters).
+                stale = getattr(self, '_stale_chunks', {})
+                for key in new_stale:
+                    if key not in stale:
+                        stale[key] = 0
+                # Remove stale chunks that have been stale for too long
+                # (safety valve — should normally be replaced sooner).
+                max_stale_age = 60  # frames
+                removed = [key for key, age in stale.items() if age >= max_stale_age]
+                for key in removed:
+                    del stale[key]
+                    self.chunks.pop(key, None)
+                # Increment age for remaining stale chunks
+                for key in stale:
+                    stale[key] += 1
+                self._stale_chunks = stale
+            else:
+                # Uniform grid: immediate removal (no LOD transitions).
+                removed = [key for key in self.chunks if key not in needed]
+                for key in removed:
+                    del self.chunks[key]
 
             # Cancel pending builds that are no longer needed
             for f in list(self._pending_futures):
@@ -264,6 +373,36 @@ class ChunkManager:
                 c.vert_count = mesh["vertices"].shape[0]
             self.chunks[key] = c
             new_chunks.append(c)
+
+            # LOD: remove stale chunks that overlap with this new chunk.
+            # A new chunk at (cx, cz, level) covers the area
+            # [cx*size, (cx+1)*size] x [cz*size, (cz+1)*size] where
+            # size = chunk_size * 2^level. Any stale chunk whose area
+            # overlaps this can be removed.
+            if self.use_lod and hasattr(self, '_stale_chunks'):
+                stale = self._stale_chunks
+                # Compute the new chunk's world-space bounds.
+                level = key[2]
+                size = self.chunk_size * (2 ** level)
+                nx0 = key[0] * size
+                nz0 = key[1] * size
+                nx1 = nx0 + size
+                nz1 = nz0 + size
+                to_remove = []
+                for skey in stale:
+                    s_level = skey[2]
+                    s_size = self.chunk_size * (2 ** s_level)
+                    sx0 = skey[0] * s_size
+                    sz0 = skey[1] * s_size
+                    sx1 = sx0 + s_size
+                    sz1 = sz0 + s_size
+                    # Check for 2D overlap
+                    if sx0 < nx1 and sx1 > nx0 and sz0 < nz1 and sz1 > nz0:
+                        to_remove.append(skey)
+                for skey in to_remove:
+                    del stale[skey]
+                    self.chunks.pop(skey, None)
+                    removed.append(skey)
 
         # Keep the process pool saturated up to the in-flight budget
         executor = self._executor

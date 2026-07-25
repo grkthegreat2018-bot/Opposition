@@ -117,6 +117,22 @@ class StreamingConfig:
     y_radius: int = 0
     max_builds_per_frame: int = 6
     target_compute_ms: float = 4.0
+    # Quadtree LOD parameters. When use_lod is True, chunks are selected
+    # via a distance-based quadtree instead of a uniform grid.
+    use_lod: bool = True
+    # LOD factor: controls how aggressively distant terrain is simplified.
+    # A node of size S is subdivided only if its nearest point to the camera
+    # is within S * lod_factor. Higher = more aggressive simplification.
+    # Typical: 1.5-3.0. At 2.0, a 128m chunk is kept until the camera is
+    # within 256m of it.
+    lod_factor: float = 2.0
+    # Maximum LOD level (coarsest chunk size = chunk_size * 2^max_level).
+    # At level 4 with chunk_size=32, the largest chunk is 512m.
+    lod_max_level: int = 4
+    # Render distance in meters for LOD mode (replaces radius * chunk_size).
+    # Set to cover roughly the same area as radius=8 (256m) but extend
+    # further since LOD keeps vertex count bounded.
+    lod_render_distance: float = 400.0
 
 
 @dataclass(frozen=True)
@@ -231,10 +247,13 @@ class Config:
         """
         kwargs = self.chunk_manager_kwargs()
         for key in ("radius", "min_radius", "max_radius", "y_radius",
-                    "max_builds_per_frame", "target_compute_ms"):
+                    "max_builds_per_frame", "target_compute_ms",
+                    "use_lod", "lod_factor", "lod_max_level",
+                    "lod_render_distance"):
             kwargs.pop(key, None)
         kwargs["size"] = kwargs.pop("chunk_size")
         kwargs["grid_res"] = 8
+        kwargs.setdefault("level", 0)
         return {"cx": 0, "cy": 0, "cz": 0, **kwargs}
 
 

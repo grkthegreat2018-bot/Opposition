@@ -6,13 +6,13 @@ import numpy as np
 import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect_count
 
-from camera import look_at, orthographic
-from chunk_data import _ChunkData, ChunkRecord
-from occlusion import Occlusion
-from shaders import SHADER, BBOX_SHADER
-from water import WaterRenderer
-from sky import SkyRenderer
-from clouds import CloudRenderer
+from core.camera import look_at, orthographic
+from render.chunk_data import _ChunkData, ChunkRecord
+from render.occlusion import Occlusion
+from render.shaders import SHADER, BBOX_SHADER
+from render.water import WaterRenderer
+from render.sky import SkyRenderer
+from render.clouds import CloudRenderer
 
 
 class TerrainRenderer:

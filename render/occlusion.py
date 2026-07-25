@@ -2,7 +2,7 @@
 import numpy as np
 import wgpu
 from wgpu.backends.wgpu_native.extras import multi_draw_indexed_indirect_count
-from gpu_arena import MeshArena
+from render.gpu_arena import MeshArena
 
 COPY_SHADER = """
 @group(0) @binding(0) var src_depth: texture_depth_2d;
@@ -294,6 +294,10 @@ class Occlusion:
         self.device.queue.write_buffer(self.cull_uniform_buffer, 0, data)
 
     def draw(self, encoder, color_view):
+        # If no chunks have been uploaded yet, the arena buffers are None.
+        # Skip the draw entirely; the renderer will clear the framebuffer.
+        if self.vertex_buffer is None or self.index_buffer is None:
+            return
         max_count = max(1, self.chunk_count)
         curr_buf = self.indirect_buffers[self.current_index]
         # Seed the HZB with a complete depth prepass of all chunks so visibility
