@@ -289,14 +289,22 @@ class App:
 
     def _draw(self):
         # Loading screen while numba prewarm runs on a background thread.
-        if not self._prewarm_done:
-            # Always show the HUD during loading (it carries the "Compiling..."
-            # message); _debug_enabled is ignored until startup finishes.
-            self.renderer.draw_loading(self.debug_hud)
-            # Check again next frame; once done, finish startup in-place.
-            if self._prewarm_done:
+        # Gate on chunk_manager (not _prewarm_done) so we also catch the case
+        # where prewarm finished before the first draw — _finish_startup must
+        # run exactly once before any real frame work.
+        if self.chunk_manager is None:
+            if not self._prewarm_done:
+                # Always show the HUD during loading (it carries the
+                # "Compiling..." message); _debug_enabled is ignored until
+                # startup finishes.
+                self.renderer.draw_loading(self.debug_hud)
+                if self._prewarm_done:
+                    self._finish_startup()
+                return
+            else:
+                # Prewarm finished between draws (or before the first draw):
+                # finish startup now, then proceed to a real frame.
                 self._finish_startup()
-            return
 
         self.profiler.frame_start()
 
