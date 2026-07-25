@@ -71,14 +71,14 @@ class PlaybackApp(App):
 
         # Playback needs the chunk manager synchronously (it sets radius
         # below); block until the async prewarm finishes.
-        self._wait_for_prewarm()
+        cm = self._wait_for_prewarm()
 
         # Override chunk radius for playback — slightly wider than default
         # so terrain doesn't vanish when panning at altitude, but not so
         # wide it overwhelms memory (radius 12 crashed the window).
-        self.chunk_manager.radius = 10
-        self.chunk_manager.min_radius = 10
-        self.chunk_manager.max_radius = 10
+        cm.radius = 10
+        cm.min_radius = 10
+        cm.max_radius = 10
 
         self._frame_count = 0
         self._phase = "warmup"
@@ -184,7 +184,9 @@ class PlaybackApp(App):
             light = sky["moon_dir"]
             sun_color = sky["moon_color"] * sky["moon_intensity"]
 
-        render_distance = self.chunk_manager.radius * self.chunk_manager.chunk_size
+        cm = self.chunk_manager
+        assert cm is not None, "chunk_manager not ready"
+        render_distance = cm.radius * cm.chunk_size
         self.camera.far = max(2500.0, render_distance * 1.5)
         proj = self.camera.projection_matrix(aspect)
 
@@ -231,12 +233,14 @@ class PlaybackApp(App):
     def _emit_report(self):
         if not self.benchmark:
             return
+        cm = self.chunk_manager
+        assert cm is not None, "chunk_manager not ready"
         meta = {
             "label": self.label,
-            "grid_res": self.chunk_manager.grid_res,
-            "chunk_size": self.chunk_manager.chunk_size,
-            "radius": self.chunk_manager.radius,
-            "seed": self.chunk_manager.seed,
+            "grid_res": cm.grid_res,
+            "chunk_size": cm.chunk_size,
+            "radius": cm.radius,
+            "seed": cm.seed,
         }
         # Discard the warmup phase — chunk pop-in and pipeline compilation
         # there would dominate the tail percentiles and mask real regressions.

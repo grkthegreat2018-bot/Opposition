@@ -125,7 +125,7 @@ class App:
         self._prewarm_thread = None
         self._prewarm_done = False
         self._prewarm_started = False
-        self.chunk_manager = None
+        self.chunk_manager: ChunkManager | None = None
         self._start_prewarm()
 
         # Loading-screen HUD text.
@@ -160,21 +160,25 @@ class App:
         # Initial chunk load
         self._update_chunks()
 
-    def _wait_for_prewarm(self):
+    def _wait_for_prewarm(self) -> ChunkManager:
         """Block until the prewarm thread finishes, then finish startup.
 
         Used by subclasses (e.g. PlaybackApp) that need the chunk manager
         synchronously in __init__ rather than waiting for the first draw.
+        Returns the chunk manager (guaranteed non-None) so callers can
+        assign it to a local for type-narrowed access.
         """
         if self._prewarm_done:
             if self.chunk_manager is None:
                 self._finish_startup()
-            return
-        if self._prewarm_thread is not None:
-            self._prewarm_thread.join()
-            self._prewarm_thread = None
-        self._prewarm_done = True
-        self._finish_startup()
+        else:
+            if self._prewarm_thread is not None:
+                self._prewarm_thread.join()
+                self._prewarm_thread = None
+            self._prewarm_done = True
+            self._finish_startup()
+        assert self.chunk_manager is not None
+        return self.chunk_manager
 
     def _bind_events(self):
         self.canvas.add_event_handler(self._on_key_down, "key_down")
@@ -237,9 +241,11 @@ class App:
     def _update_chunks(self):
         if self._chunks_frozen:
             return 0.0
+        cm = self.chunk_manager
+        assert cm is not None, "chunk_manager not ready"
         compute_time = 0.0
         t0 = time.perf_counter()
-        changed, new_chunks, removed = self.chunk_manager.update(self.camera.pos)
+        changed, new_chunks, removed = cm.update(self.camera.pos)
         compute_time += time.perf_counter() - t0
         if changed:
             t1 = time.perf_counter()
@@ -335,7 +341,9 @@ class App:
         # Loaded radius in meters; keep the far plane beyond it but within a
         # depth-friendly range. Fog fades the chunk edge to the sky color.
         # Extra margin for the cloud plane (4000m wide centered on camera).
-        render_distance = self.chunk_manager.radius * self.chunk_manager.chunk_size
+        cm = self.chunk_manager
+        assert cm is not None, "chunk_manager not ready"
+        render_distance = cm.radius * cm.chunk_size
         self.camera.far = max(self.cfg.camera.min_far, render_distance * 1.5)
         proj = self.camera.projection_matrix(aspect)
 
@@ -352,7 +360,7 @@ class App:
                 f"YAW  {self.camera.yaw:8.4f} RAD  {np.degrees(self.camera.yaw):8.2f} DEG",
                 f"PITC {self.camera.pitch:8.4f} RAD  {np.degrees(self.camera.pitch):8.2f} DEG",
                 f"FROZEN {'YES' if self._chunks_frozen else 'NO'}  MARKED {len(self._marked_chunks)}",
-                f"FPS RAD={self.chunk_manager.radius} CHUNKS={len(self.renderer.chunk_meshes)}",
+                f"FPS RAD={cm.radius} CHUNKS={len(self.renderer.chunk_meshes)}",
                 f"F1 HUD  F2 FREEZE  F3 MARK",
             ]
             self.debug_hud.update_text(hud_lines)
@@ -369,8 +377,8 @@ class App:
 
         summary = self.profiler.frame_end(render_time=render_time, compute_time=compute_time)
         if summary:
-            self.chunk_manager.adjust_radius(summary["compute"]["peak"] * 1000.0)
-            self.profiler.log(summary, self.chunk_manager)
+            cm.adjust_radius(summary["compute"]["peak"] * 1000.0)
+            self.profiler.log(summary, cm)
 
     def run(self):
         self.canvas.request_draw(self._draw)
