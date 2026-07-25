@@ -120,23 +120,24 @@ def _coastal_ridge_weight(mask, peak, width, strength):
 
 
 @numba.njit(cache=True, fastmath=True, parallel=True)
-def _ocean_flatness(mask, sea_t, transition):
+def _ocean_flatness(mask, sea_t, transition, floor=0.0):
     """Map a [0, 1] mask to a terrain-amplitude multiplier.
 
-    Returns 0 in deep ocean (flat seafloor), 1 on land, with a smooth
+    Returns ``floor`` in deep ocean (gentle underwater terrain detail
+    instead of a completely flat seafloor), 1.0 on land, with a smooth
     transition zone of width ``transition`` around the sea threshold.
-    This suppresses all fBm/ridge/detail noise underwater so the seafloor
-    is smooth, not jagged.
+    ``floor=0`` gives a flat seafloor; ``floor=0.15`` gives gentle hills.
     """
     out = np.empty_like(mask)
     for i in numba.prange(mask.shape[0]):
         for j in range(mask.shape[1]):
             m = mask[i, j]
             if m <= sea_t - transition:
-                out[i, j] = 0.0
+                out[i, j] = floor
             elif m >= sea_t + transition:
                 out[i, j] = 1.0
             else:
                 t = (m - (sea_t - transition)) / (2.0 * transition)
-                out[i, j] = t * t * (3.0 - 2.0 * t)
+                t = t * t * (3.0 - 2.0 * t)
+                out[i, j] = floor + (1.0 - floor) * t
     return out

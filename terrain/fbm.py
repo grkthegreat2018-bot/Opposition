@@ -177,6 +177,7 @@ def _compute_height(
     coastal_width: float = 0.18,
     coastal_mountain_strength: float = 0.7,
     ocean_transition: float = 0.06,
+    ocean_detail_floor: float = 0.15,
 ):
     """Return a height field for given world x/z coordinates.
 
@@ -234,7 +235,10 @@ def _compute_height(
     cont_elev = _continental_elevation(cont_mask, sea_level, ocean_depth, land_boost)
     coastal_rw = _coastal_ridge_weight(
         cont_mask, coastal_peak, coastal_width, coastal_mountain_strength)
-    ocean_flat = _ocean_flatness(cont_mask, 0.40, ocean_transition)
+    # Ocean flatness ramps from ocean_detail_floor (not 0) to 1.0 so the
+    # seafloor has gentle terrain detail instead of being a flat plane
+    # that creates a hard visual line against detailed land terrain.
+    ocean_flat = _ocean_flatness(cont_mask, 0.40, ocean_transition, ocean_detail_floor)
 
     # Regional low-frequency variation on land (broad rolling hills). The
     # continental mask handles oceans/mountains; this adds interior variety.

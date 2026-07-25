@@ -52,6 +52,7 @@ class Chunk:
         coastal_width: float = 0.18,
         coastal_mountain_strength: float = 0.7,
         ocean_transition: float = 0.06,
+        ocean_detail_floor: float = 0.15,
         erosion_iters: int = 0,
         erosion_talus: float = 1.5,
         erosion_factor: float = 0.25,
@@ -90,6 +91,7 @@ class Chunk:
         self.coastal_width = coastal_width
         self.coastal_mountain_strength = coastal_mountain_strength
         self.ocean_transition = ocean_transition
+        self.ocean_detail_floor = ocean_detail_floor
         self.erosion_iters = erosion_iters
         self.erosion_talus = erosion_talus
         self.erosion_factor = erosion_factor
@@ -368,4 +370,5 @@ class Chunk:
             coastal_width=self.coastal_width,
             coastal_mountain_strength=self.coastal_mountain_strength,
             ocean_transition=self.ocean_transition,
+            ocean_detail_floor=self.ocean_detail_floor,
         )

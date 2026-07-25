@@ -51,20 +51,27 @@ class ContinentalConfig:
     continental_freq: float = 0.0002
     # Height of the ocean surface. Terrain below this is underwater.
     sea_level: float = 0.0
-    # How far below sea_level the deep ocean floor drops.
-    ocean_depth: float = 18.0
+    # How far below sea_level the deep ocean floor drops. Keep moderate so
+    # the ocean-to-land transition doesn't create severe cliffs at chunk
+    # boundaries (the skirt system can only cover limited height deltas).
+    ocean_depth: float = 10.0
     # Base elevation boost for land above sea_level (continental interior).
-    land_boost: float = 12.0
+    land_boost: float = 10.0
     # Coastal mountain chain parameters. Mountains peak at ``coastal_peak``
     # (mask value) with a Gaussian falloff of ``coastal_width``.
     coastal_peak: float = 0.65
     coastal_width: float = 0.18
     # Strength of the coastal mountain effect (0 = no coastal mountains,
     # 1 = full ridge weight at the coast). Scales the ridge multiplier.
-    coastal_mountain_strength: float = 0.7
+    coastal_mountain_strength: float = 0.4
     # Width of the ocean-to-land amplitude transition (in mask units).
-    # Within this band, terrain amplitude ramps from 0 (flat ocean) to 1.
-    ocean_transition: float = 0.06
+    # Within this band, terrain amplitude ramps from the ocean floor
+    # amplitude to 1. Wider = smoother coastline but less defined shore.
+    ocean_transition: float = 0.12
+    # Minimum terrain amplitude in the ocean (0 = flat seafloor, 0.15 =
+    # gentle underwater hills). Prevents the ocean from looking like a
+    # flat plane abutting detailed land terrain.
+    ocean_detail_floor: float = 0.15
 
 
 @dataclass(frozen=True)
@@ -114,7 +121,7 @@ class StreamingConfig:
 
 @dataclass(frozen=True)
 class CameraConfig:
-    start_pos: tuple = (500.0, 50.0, 500.0)
+    start_pos: tuple = (2000.0, 80.0, 2000.0)
     start_yaw: float = -np.pi / 2
     start_pitch: float = 0.0
     fov: float = 75.0
@@ -206,6 +213,7 @@ class Config:
             "coastal_width": c.coastal_width,
             "coastal_mountain_strength": c.coastal_mountain_strength,
             "ocean_transition": c.ocean_transition,
+            "ocean_detail_floor": c.ocean_detail_floor,
             "erosion_iters": e.iters,
             "erosion_talus": e.talus,
             "erosion_factor": e.factor,
