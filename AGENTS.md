@@ -29,7 +29,8 @@ Before running, compile changed modules:
   - `terrain/fbm.py`: derivative-eroded fBm, ridged fBm with per-octave rotation, height field composition.
   - `terrain/features.py`: rivers, plateaus, canyons, craters, glacial valleys (all seam-safe, numba-jit'd).
   - `terrain/erosion.py`: thermal, hydraulic (numba), wind erosion + Gaussian smoothing.
-  - `terrain/manager.py`: `ChunkManager` — async process-pool chunk building, streaming, caching.
+  - `terrain/manager.py`: `ChunkManager` — async process-pool chunk building, streaming, caching. Supports uniform-grid and quadtree LOD modes (`use_lod` in `StreamingConfig`).
+  - `terrain/quadtree.py`: `select_quadtree()` — distance-based quadtree LOD selection. Level-0 chunks (32m, 48x48 verts) near camera; coarser levels (up to 512m at level 4) far away. ~42% fewer verts than uniform grid for same render distance. Camera position quantized to 32m grid to prevent re-selection churn. Stale chunks retained until replacements built (prevents LOD-transition gaps).
   - `terrain/biomes.py`, `terrain/_noise_core.py`: biome blending + numba simplex noise core.
   - `terrain/continental.py`: continental-scale land/ocean mask, coastal mountain chains, ocean flatness (all seam-safe, numba-jit'd).
   - **Numba-jit'd 2D simplex noise** (`_snoise2_scalar`, `_snoise2_grid`, `_fbm_grid`) — bit-identical to `noise.snoise2`, ~10x faster than `np.vectorize`. See `docs/feature_log_perf_biomes_pbr.md`.
@@ -70,6 +71,7 @@ Before running, compile changed modules:
 ## Performance Baseline (RTX 5070, 32GB RAM)
 
 - After GPU arena + packed vertices + continental worldgen: ~1100-1300 FPS avg, ~350 FPS min (chunk streaming), ~0.7ms render time, ~0.15ms compute time, ~8% VRAM, ~8-9% GPU, ~420MB proc mem.
+- After quadtree LOD (Phase 4a-c): ~1150-1250 FPS avg, ~310-360 FPS min, ~1600 peak, ~0.70-0.75ms render, ~0.07-0.20ms compute (LOD selection), ~9.1% VRAM, ~418MB proc mem. ~42% fewer verts than uniform grid for same render distance.
 - Chunk build: 1.4ms warm (no features), 1.8ms warm (all 4 features). Was 12ms before numba.
 - Vertex buffer: 32 bytes/vertex (packed: pos f32x3 + normal snorm8x4 + biome unorm8x4 + sc f16x2 + pad). Was 48 bytes. Fragment shader: PBR adds ~15 ALU ops, material details add ~10.
 - Numba prewarm: ~0.36s cached, ~6.5s cold start. Runs async on a background thread with a loading screen.
